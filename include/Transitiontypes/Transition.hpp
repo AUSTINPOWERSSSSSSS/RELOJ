@@ -38,7 +38,7 @@ Transition::~Transition() {
 #if 0
     // matrix type changes during runtime forces a ESP reset
     // probably to avoid reinitializing the Neopixelbus
-    for (uint8_t row = 0; row < maxRows; row++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
         delete[] old[row];
         delete[] act[row];
         delete[] work[row];
@@ -52,8 +52,16 @@ Transition::~Transition() {
 }
 
 //------------------------------------------------------------------------------
+// Make special events at silvester and birthday
+//------------------------------------------------------------------------------
+// On Silvester, make a countdwon for the last minute of the year, then make a
+// fireworks animation. On birthdays, a fireworks animation appears every 5
+// minutes. Compatible clock types will display the words “Happy Birthday”
+// instead of the time during the animation. Birthdays before 1900 are not
+// animated.
 
-bool Transition::isSilvester(Transition_t &type, struct tm &tm, bool trigger) {
+bool Transition::isSpecialEvent(Transition_t &type, struct tm &tm,
+                                bool trigger) {
     static uint8_t minutesAfterMidnight;
 
     if (trigger) {
@@ -65,18 +73,19 @@ bool Transition::isSilvester(Transition_t &type, struct tm &tm, bool trigger) {
 #endif
         {
             minutesAfterMidnight = 0;
-            type = COUNTDOWN;
+            type = NEWYEAR_COUNTDOWN;
         } else {
             minutesAfterMidnight++;
         }
-        if ((type == NEWYEAR) && (minutesAfterMidnight >= 11)) {
+        if ((type == NEWYEAR_FIRE) && (minutesAfterMidnight >= 11)) {
             type = getTransitionType(true);
         }
     }
-    return (type == COUNTDOWN) || (type == NEWYEAR);
+    return (type == NEWYEAR_COUNTDOWN) || (type == NEWYEAR_FIRE);
 }
 
 //------------------------------------------------------------------------------
+// Get configured transition type: Random or Fix type
 
 Transition_t Transition::getTransitionType(bool trigger) {
     if (G.transitionType == RANDOM) {
@@ -112,8 +121,9 @@ bool Transition::changeBrightness() {
         foregroundMinute = RgbColor(hsbColor);
         RgbfColor **matrix[3] = {act, old, work};
         for (uint8_t m = 0; m < 3; m++) {
-            for (uint8_t row = 0; row < maxRows; row++) {
-                for (uint8_t col = 0; col < maxCols; col++) {
+            for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+                for (uint8_t col = 0; col < usedUhrType->colsWordMatrix();
+                     col++) {
                     if (adjustBg) {
                         if (!matrix[m][row][col].isForeground()) {
                             matrix[m][row][col] = newBackground;
@@ -198,8 +208,8 @@ void Transition::colorize(RgbfColor **dest) {
     hsbColor.H = pseudoRandomHue();
     foregroundMinute = isColorization() ? RgbColor(hsbColor) : foreground;
     hsbColor.H = pseudoRandomHue();
-    for (uint8_t row = 0; row < maxRows; row++) {
-        for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             if (dest[row][col].isForeground()) {
                 if ((G.transitionColorize == CHARACTERS) || changeColor) {
                     changeColor = false;
@@ -239,8 +249,8 @@ void Transition::analyzeColors(RgbfColor **dest, RgbfColor **source,
                                RgbfColor &foreground, RgbfColor &background) {
     RgbfColor color, color1(0), color2(0);
     uint32_t colorCounter1 = 0, colorCounter2 = 0;
-    for (uint8_t row = 0; row < maxRows; row++) {
-        for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             if (source == STRIPE) {
                 color = RgbfColor(
                     led.getPixel(usedUhrType->getFrontMatrixIndex(row, col)));
@@ -280,8 +290,8 @@ void Transition::analyzeColors(RgbfColor **dest, RgbfColor **source,
     background.setForeground(false);
     background.setOverlay(false);
     if (dest != NULL) {
-        for (uint8_t row = 0; row < maxRows; row++) {
-            for (uint8_t col = 0; col < maxCols; col++) {
+        for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+            for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
                 dest[row][col].setForeground(dest[row][col] == foreground);
             }
         }
@@ -311,21 +321,20 @@ void Transition::setMinute() {
 // Overwrite the LEDs with internal matrix
 
 void Transition::copy2Stripe(RgbfColor **source) {
-    for (uint8_t row = 0; row < maxRows; row++) {
-        for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             led.setPixel(
                 usedUhrType->getFrontMatrixIndex(row, col),
                 HsbColor{RgbColor(source[row][col].R, source[row][col].G,
                                   source[row][col].B)});
         }
     }
-    setMinute();
 }
 
 //------------------------------------------------------------------------------
 
 void Transition::copyMatrix(RgbfColor **dest, RgbfColor **source) {
-    for (uint8_t row = 0; row < maxRows; row++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
         memcpy(dest[row], source[row], sizeofColumn);
     }
 }
@@ -333,8 +342,8 @@ void Transition::copyMatrix(RgbfColor **dest, RgbfColor **source) {
 //------------------------------------------------------------------------------
 
 void Transition::copyMatrixFlags(RgbfColor **dest, RgbfColor **source) {
-    for (uint8_t row = 0; row < maxRows; row++) {
-        for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             dest[row][col].setFlags(source[row][col].getFlags());
         }
     }
@@ -343,8 +352,8 @@ void Transition::copyMatrixFlags(RgbfColor **dest, RgbfColor **source) {
 //------------------------------------------------------------------------------
 
 void Transition::fillMatrix(RgbfColor **matrix, RgbfColor color) {
-    for (uint8_t row = 0; row < maxRows; row++) {
-        for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             matrix[row][col] = color;
         }
     }
@@ -435,20 +444,20 @@ uint16_t Transition::transitionScrollDown(bool dirDown) {
     bool copyFromNeu;
 
     if (phase == 1) {
-        transitionDelay = calcDelay(maxRows) / 4;
+        transitionDelay = calcDelay(usedUhrType->rowsWordMatrix()) / 4;
     }
     if (dirDown) {
         wechsel = phase;
         rowAlt = 0;
-        rowNeu = maxRows - phase;
+        rowNeu = usedUhrType->rowsWordMatrix() - phase;
     } else {
-        wechsel = maxRows - phase;
+        wechsel = usedUhrType->rowsWordMatrix() - phase;
         rowAlt = phase;
         rowNeu = 0;
     }
-    for (uint8_t row = 0; row < maxRows; row++) {
+    for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
         copyFromNeu = (row >= wechsel) ^ dirDown;
-        for (uint8_t col = 0; col < maxCols; col++) {
+        for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
             if (copyFromNeu) {
                 work[row][col] = act[rowNeu][col];
             } else {
@@ -461,7 +470,7 @@ uint16_t Transition::transitionScrollDown(bool dirDown) {
             rowAlt++;
         }
     }
-    if (phase >= maxRows) {
+    if (phase >= usedUhrType->rowsWordMatrix()) {
         return 0;
     }
     return phase + 1;
@@ -483,20 +492,20 @@ uint16_t Transition::transitionScrollRight(bool dirRight) {
     bool copyFromNeu;
 
     if (phase == 1) {
-        transitionDelay = calcDelay(maxCols) / 4;
+        transitionDelay = calcDelay(usedUhrType->colsWordMatrix()) / 4;
     }
     if (dirRight) {
         wechsel = phase;
         colAlt = 0;
-        colNeu = maxCols - phase;
+        colNeu = usedUhrType->colsWordMatrix() - phase;
     } else {
-        wechsel = maxCols - phase;
+        wechsel = usedUhrType->colsWordMatrix() - phase;
         colAlt = phase;
         colNeu = 0;
     }
-    for (uint8_t col = 0; col < maxCols; col++) {
+    for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
         copyFromNeu = (col >= wechsel) ^ dirRight;
-        for (uint8_t row = 0; row < maxRows; row++) {
+        for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
             if (copyFromNeu) {
                 work[row][col] = act[row][colNeu];
             } else {
@@ -509,7 +518,7 @@ uint16_t Transition::transitionScrollRight(bool dirRight) {
             colAlt++;
         }
     }
-    if (phase >= maxCols) {
+    if (phase >= usedUhrType->colsWordMatrix()) {
         return 0;
     }
     return phase + 1;
@@ -527,8 +536,12 @@ uint16_t Transition::transitionBalls() {
     if (phase == 1) {
         transitionDelay = 50; // 20 Frames per second
         numBalls = 0;
-        for (col = 0; (col < maxCols) && (numBalls < maxCols); col++) {
-            for (row = 0; (row < maxRows) && (numBalls < maxCols); row++) {
+        for (col = 0; (col < usedUhrType->colsWordMatrix()) &&
+                      (numBalls < usedUhrType->colsWordMatrix());
+             col++) {
+            for (row = 0; (row < usedUhrType->rowsWordMatrix()) &&
+                          (numBalls < usedUhrType->rowsWordMatrix());
+                 row++) {
                 if (work[row][col].isForeground()) {
                     balls[numBalls].begin(row, col, work[row][col], background,
                                           100 * numBalls);
@@ -614,11 +627,11 @@ uint16_t Transition::transitionFire() {
         case (FIRE_6 + 4):
             mirrored = !mirrored;
             copyMatrix(old, act); // old contains artefacts
-            if ((transitionType == NEWYEAR)) {
+            if ((transitionType == NEWYEAR_FIRE)) {
                 transitionDelay = 500;
-                return 1; // next transition in 500ms
+                return 1; // restart transition
             }
-            return 0; // end of transition
+            return 0; // end transition
             break;
         default:
             firework->prepare(0, _white, static_cast<Icons>(phase), mirrored);
@@ -637,8 +650,9 @@ uint16_t Transition::transitionFire() {
         fading = 1.0;
     }
     bool overlay;
-    for (uint8_t col = 0; col < maxCols; col++) {
-        for (uint8_t row = 0; row < maxRows; row++) {
+
+    for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
+        for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
             overlay = firework->getPixel(row, col, overlayColor);
             if (sparkle) {
                 if (work[row][col].isOverlay()) {
@@ -695,7 +709,7 @@ uint16_t Transition::transitionCountdown(struct tm &tm) {
         if (countDown < 0) { // 60 - 0
             countDown = 60;
             lastSecond = 99;
-            transitionType = NEWYEAR;
+            transitionType = NEWYEAR_FIRE;
             return 1; // continue FIRE in phase 1
         }
         lastSecond = _second;
@@ -744,8 +758,9 @@ void Transition::transitionColorChange() {
             lastTimeColor = now;
             float deltaHue = fmod(1.0 / (G.transitionSpeed * 20.0), 1.0);
             HsbColor hsbColor;
-            for (uint8_t row = 0; row < maxRows; row++) {
-                for (uint8_t col = 0; col < maxCols; col++) {
+            for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
+                for (uint8_t col = 0; col < usedUhrType->colsWordMatrix();
+                     col++) {
                     if (work[row][col].isForeground()) {
                         hsbColor = HsbColor(work[row][col]);
                         hsbColor.H = fmod(hsbColor.H + deltaHue, 1.0);
@@ -768,7 +783,8 @@ uint16_t Transition::transitionLaser() {
     static RgbfColor strahl(255);
 
     if (phase == 1) {
-        transitionDelay = calcDelay(maxRows * maxCols * 2);
+        transitionDelay = calcDelay(usedUhrType->rowsWordMatrix() *
+                                    usedUhrType->colsWordMatrix() * 2);
         row = 0;
         col = 0;
         copyMatrix(work, old);
@@ -781,11 +797,11 @@ uint16_t Transition::transitionLaser() {
         work[row][col] = act[row][col];
     }
 
-    if (++col >= maxCols) {
+    if (++col >= usedUhrType->colsWordMatrix()) {
         col = 0;
         row++;
     }
-    if (row < maxRows) {
+    if (row < usedUhrType->rowsWordMatrix()) {
         work[row][col] = strahl;
     } else {
         row = 0;
@@ -809,8 +825,8 @@ uint16_t Transition::transitionFade() {
     }
     float progress = static_cast<float>(phase) / static_cast<float>(frames);
 
-    for (uint8_t col = 0; col < maxCols; col++) {
-        for (uint8_t row = 0; row < maxRows; row++) {
+    for (uint8_t col = 0; col < usedUhrType->colsWordMatrix(); col++) {
+        for (uint8_t row = 0; row < usedUhrType->rowsWordMatrix(); row++) {
             color = color.LinearBlend(old[row][col], act[row][col], progress);
             work[row][col].changeRgb(color);
         }
@@ -835,9 +851,9 @@ uint16_t Transition::transitionMatrixRain() {
         copyMatrix(old, work); // work is still the previous transition array
         uint8_t stop;
         uint8_t brightness = foreground.CalculateBrightness();
-        for (col = 0; col < maxCols; col++) {
-            stop = maxRows - 1;
-            for (row = maxRows - 1; row >= 0; row--) {
+        for (col = 0; col < usedUhrType->colsWordMatrix(); col++) {
+            stop = usedUhrType->rowsWordMatrix() - 1;
+            for (row = usedUhrType->rowsWordMatrix() - 1; row >= 0; row--) {
                 if (work[row][col].isForeground()) {
                     stop = row;
                     break;
@@ -847,8 +863,8 @@ uint16_t Transition::transitionMatrixRain() {
         }
     }
     float progress = static_cast<float>(phase) / static_cast<float>(frames);
-    for (col = 0; col < maxCols; col++) {
-        for (row = 0; row < maxRows; row++) {
+    for (col = 0; col < usedUhrType->rowsWordMatrix(); col++) {
+        for (row = 0; row < usedUhrType->colsWordMatrix(); row++) {
             fadeColor =
                 fadeColor.LinearBlend(old[row][col], act[row][col], progress);
             rainColor = rain[col].get(row);
@@ -907,6 +923,13 @@ void Transition::initTransitionStart() {
 }
 
 //------------------------------------------------------------------------------
+// TODO: This function is used in two different functions:
+// 1) Transition::isOverwrittenByTransition
+// 2) Transition::loop
+// It looks like that it is intended that function 1 and 2 both can reset the
+// "MinuteChanged" status, so that only the first function calling the
+// Transition::hasMinuteChanged is executed!?
+// Are there better implementations which are more obvious?
 
 bool Transition::hasMinuteChanged() {
     if (lastMinute != _minute) {
@@ -949,13 +972,18 @@ bool Transition::isOverwrittenByTransition(WordclockChanges changesInWordMatrix,
 }
 
 //------------------------------------------------------------------------------
+
+void Transition::init() { saveMatrix(); }
+
+//------------------------------------------------------------------------------
 // Loop Functions
 //------------------------------------------------------------------------------
 
 void Transition::loop(struct tm &tm) {
     if (G.prog == COMMAND_IDLE || G.prog == COMMAND_MODE_WORD_CLOCK) {
-        if (!isSilvester(transitionType, tm, hasMinuteChanged())) {
-            transitionType = getTransitionType(matrixChanged);
+        if (!isSpecialEvent(transitionType, tm, hasMinuteChanged())) {
+            transitionType =
+                getTransitionType(matrixChanged); // hasMinuteChanged()
         }
 
         if (matrixChanged) {
@@ -1014,14 +1042,15 @@ void Transition::loop(struct tm &tm) {
                 case BALLS:
                     phase = transitionBalls();
                     break;
-                case NEWYEAR:
+                case BIRTHDAY:
+                case NEWYEAR_FIRE:
                 case FIRE:
                     phase = transitionFire();
                     break;
                 case SNAKE:
                     phase = transitionSnake();
                     break;
-                case COUNTDOWN:
+                case NEWYEAR_COUNTDOWN:
                     phase = transitionCountdown(tm);
                     break;
                 case RANDOM:
@@ -1031,7 +1060,6 @@ void Transition::loop(struct tm &tm) {
             }
             transitionColorChange();
             copy2Stripe(work);
-            setMinute(); // TODO: Is setMinute() on the right place ?
             led.show();
         }
     }
